@@ -1,0 +1,17 @@
+# Developer Cognitive Load Monitoring System
+# Python 3.12+ | macOS
+
+# Computer Vision
+opencv-python>=4.9.0
+
+# MediaPipe Face Landmarker (Python 3.12 compatible)
+mediapipe>=0.10.14
+
+# Numerical operations
+numpy>=1.26.0
+
+# Dashboard
+streamlit>=1.35.0
+
+# Data analysis (used by dashboard)
+pandas>=2.2.0
