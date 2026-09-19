@@ -3,113 +3,151 @@ cognitive_load.py — Cognitive load scoring engine.
 
 Estimates cognitive load level (LOW / MEDIUM / HIGH) from eye metrics.
 
-Scoring model (rule-based, research-informed):
-─────────────────────────────────────────────
-Metric              | High load signal
-────────────────────|──────────────────────────────────────────
-Blink rate          | Very low (<8/min) or very high (>25/min)
-EAR                 | Sustained low EAR (squinting / strain)
-Eye closure events  | Frequent prolonged closures
-Drowsiness          | Direct high-load / fatigue indicator
+Scoring model (research-informed, temporally smoothed):
+────────────────────────────────────────────────────────
+Metric               | High load signal
+─────────────────────|──────────────────────────────────────────────
+Blink rate (60s)     | Sustained low (<8/min) = intense focus/load
+Blink burst (10s)    | Sudden spike >6 blinks/10s = stress response
+
+Deliberate design choices
+─────────────────────────
+• EAR and drowsiness are NOT used for cognitive load scoring.
+  Closing your eyes (intentionally or accidentally) must never raise
+  the cognitive load score. EAR drops to ~0 while eyes are shut, which
+  would poison the strain signal; drowsiness is a fatigue indicator,
+  not a load indicator. Both are excluded.
+
+• EAR history is only updated when eyes are OPEN (eye_closed=False) so
+  the rolling average cannot be corrupted by blink frames.
+
+• Score is EMA-smoothed so it drifts rather than spikes.
+
+• Blink rate below normal (suppressed blinking) is the primary
+  research-validated proxy for high cognitive load.
+  A rapid blink burst separately catches the stress/anxiety signal.
 
 Score range: 0–100
-  0–33  → LOW cognitive load
-  34–66 → MEDIUM cognitive load
-  67–100 → HIGH cognitive load
+  0–33  → LOW
+  34–66 → MEDIUM
+  67–100 → HIGH
 
 References:
   - Iqbal et al. (2004): blink rate decreases under high cognitive load
-  - Recarte & Nunes (2003): EAR correlates with mental workload
+  - Stem et al. (1994): blink rate increases under stress/anxiety
 """
 
 from collections import deque
 import time
 
-
-# ─── Baseline blink rate (normal relaxed state) ──────────────────────────────
+# ─── Blink rate thresholds ───────────────────────────────────────────────────
 NORMAL_BLINK_RATE_MIN = 12.0   # blinks/min lower bound (relaxed)
 NORMAL_BLINK_RATE_MAX = 20.0   # blinks/min upper bound (relaxed)
 
-# EAR baseline — below this sustained = squinting / strain
-EAR_STRAIN_THRESHOLD = 0.22
+# EMA smoothing factor — lower = smoother / slower to react
+EMA_ALPHA = 0.06
 
-# How many recent EAR samples to average for strain detection
-EAR_HISTORY_LEN = 30
+# Blink burst detection window
+BURST_WINDOW_SEC = 10.0
+BURST_HIGH_THRESHOLD = 6   # > 6 blinks in 10 s = stress burst
 
 
 class CognitiveLoadScorer:
     """
-    Computes a 0–100 cognitive load score from live eye metrics.
+    Computes a 0–100 cognitive load score from blink-rate metrics only.
+
+    Eye closure (EAR, drowsiness, closure duration) is intentionally
+    excluded — see module docstring for rationale.
 
     Usage:
         scorer = CognitiveLoadScorer()
-        score, level = scorer.update(blink_rate, ear, drowsy, closure_duration)
+        score, level = scorer.update(
+            blink_rate, eye_closed=False, blink_timestamps=deque(...)
+        )
     """
 
     def __init__(self):
-        self._ear_history: deque = deque(maxlen=EAR_HISTORY_LEN)
-        self.score = 0
+        self._ema_score: float = 5.0
+        self.score = 5
         self.level = 'LOW'
 
-    def update(self, blink_rate: float, ear: float,
-               drowsy: bool, closure_duration: float) -> tuple:
+    def update(
+        self,
+        blink_rate: float,
+        eye_closed: bool = False,
+        blink_timestamps: deque | None = None,
+        # legacy kwargs kept for call-site compatibility — not used
+        ear: float = 0.28,
+        drowsy: bool = False,
+        closure_duration: float = 0.0,
+    ) -> tuple:
         """
-        Compute cognitive load score from current metrics.
+        Compute cognitive load score.
 
         Args:
-            blink_rate:        blinks per minute (rolling 60s window)
-            ear:               current averaged EAR
-            drowsy:            True if prolonged eye closure detected
-            closure_duration:  seconds eyes have been closed
+            blink_rate:       blinks/min from the 60-second rolling window
+            eye_closed:       True while eyes are currently closed —
+                              scoring is suspended during closures so
+                              a deliberate eye-rest cannot spike the score
+            blink_timestamps: deque of recent blink epoch timestamps for
+                              burst detection (passed from BlinkTracker)
+            ear, drowsy, closure_duration: accepted but ignored
 
         Returns:
-            (score: int, level: str)  — score 0–100, level LOW/MEDIUM/HIGH
+            (score: int, level: str)
         """
-        self._ear_history.append(ear)
-        avg_ear = sum(self._ear_history) / len(self._ear_history)
+        # ── While eyes are closed, hold the current score steady ─────────────
+        # This is the key fix: we simply skip updating the EMA during any
+        # eye closure so there is zero feedback from intentional eye-rests.
+        if eye_closed:
+            return self.score, self.level
 
-        score = 0
+        raw = 0
 
-        # ── Blink rate scoring (0–40 points) ─────────────────────────────────
-        # Very low blink rate = high focus / high load
-        # Very high blink rate = fatigue / stress
+        # ── 1. Sustained blink rate (0–55 pts) ───────────────────────────────
+        # Primary load signal. Suppressed blinking = deep focus / high load.
+        # Elevated blinking = stress / fatigue.
         if blink_rate < 5:
-            score += 40    # very suppressed blinking = intense focus
+            raw += 55    # heavily suppressed — very high load
         elif blink_rate < NORMAL_BLINK_RATE_MIN:
-            score += 25    # below normal = elevated load
+            raw += 35    # below normal — elevated load
         elif blink_rate <= NORMAL_BLINK_RATE_MAX:
-            score += 5     # normal range = low load
+            raw += 5     # normal range — low load
         elif blink_rate < 30:
-            score += 20    # above normal = stress/fatigue
+            raw += 25    # above normal — mild stress
         else:
-            score += 35    # very high = significant fatigue
+            raw += 45    # very high — significant fatigue/stress
 
-        # ── EAR strain scoring (0–30 points) ─────────────────────────────────
-        # Sustained low EAR = squinting = eye strain = high load
-        if avg_ear < EAR_STRAIN_THRESHOLD:
-            strain_ratio = max(0.0, (EAR_STRAIN_THRESHOLD - avg_ear) / EAR_STRAIN_THRESHOLD)
-            score += int(strain_ratio * 30)
+        # ── 2. Blink burst detection (0–30 pts) ──────────────────────────────
+        # A sudden cluster in a short window signals stress before the
+        # 60-second average has time to catch up.
+        if blink_timestamps is not None:
+            now = time.time()
+            burst_cutoff = now - BURST_WINDOW_SEC
+            burst_count = sum(1 for t in blink_timestamps if t >= burst_cutoff)
+            if burst_count > BURST_HIGH_THRESHOLD:
+                # 7 blinks/10s → ~8 pts; 13+ blinks/10s → 30 pts
+                burst_pts = min(30, int((burst_count - BURST_HIGH_THRESHOLD) * 4.5))
+                raw += burst_pts
 
-        # ── Drowsiness scoring (0–20 points) ─────────────────────────────────
-        if drowsy:
-            score += 20
-        elif closure_duration > 0.5:
-            score += 10    # partial closure
+        # ── Clamp ─────────────────────────────────────────────────────────────
+        raw = max(0, min(100, raw))
 
-        # ── Clamp to 0–100 ───────────────────────────────────────────────────
-        score = max(0, min(100, score))
+        # ── EMA smoothing ─────────────────────────────────────────────────────
+        self._ema_score = EMA_ALPHA * raw + (1.0 - EMA_ALPHA) * self._ema_score
+        smoothed = int(round(self._ema_score))
 
-        # ── Map to level ─────────────────────────────────────────────────────
-        if score <= 33:
+        # ── Level mapping ─────────────────────────────────────────────────────
+        if smoothed <= 33:
             level = 'LOW'
-        elif score <= 66:
+        elif smoothed <= 66:
             level = 'MEDIUM'
         else:
             level = 'HIGH'
 
-        self.score = score
+        self.score = smoothed
         self.level = level
-        return score, level
+        return smoothed, level
 
     def reset(self):
         self.__init__()

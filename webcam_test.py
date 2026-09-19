@@ -77,9 +77,8 @@ def main():
             # ── Cognitive load scoring ────────────────────────────────────
             score, level = scorer.update(
                 blink_rate=result['blink_rate'],
-                ear=ear,
-                drowsy=result['drowsy'],
-                closure_duration=result['closure_duration'],
+                eye_closed=result['eye_closed'],
+                blink_timestamps=blink_tracker._blink_timestamps,
             )
 
             # ── Update cognitive_data dict ────────────────────────────────

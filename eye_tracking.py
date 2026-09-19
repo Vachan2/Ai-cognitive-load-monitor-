@@ -31,7 +31,6 @@ MODEL_URL = (
     "face_landmarker/face_landmarker/float16/1/face_landmarker.task"
 )
 
-
 def _download_model():
     """Download the FaceLandmarker model with SSL bypass (macOS fix)."""
     if os.path.exists(MODEL_PATH):
@@ -44,7 +43,6 @@ def _download_model():
          open(MODEL_PATH, "wb") as f:
         f.write(resp.read())
     print("Model downloaded.")
-
 
 class EyeTracker:
     """
