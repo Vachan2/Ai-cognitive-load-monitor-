@@ -58,6 +58,7 @@ NeuroSync is a real-time cognitive load monitoring system for software developer
 - **CSV session logging** — one row per second written to `sessions/session_YYYYMMDD_HHMMSS.csv`.
 - **Streamlit dashboard** — reads session CSVs and renders live-refreshing charts for post-session analysis.
 - **ESP32 hardware integration** (optional) — pushes cognitive score and RGB LED color to a 12-LED ring over HTTP POST at 1-second intervals.
+- **Azure Foundry voice alerts** (optional) — speaks controlled break reminders when real cognitive load crosses 50% or 70%.
 
 ---
 
@@ -144,6 +145,8 @@ developer_cognitiv_load/                 ← workspace root
         │   └── api/
         │       ├── analyze/
         │       │   └── route.ts          ← POST /api/analyze — AI insight endpoint
+        │       ├── voice-alert/
+        │       │   └── route.ts          ← POST /api/voice-alert — Foundry audio response
         │       ├── eye-metrics/
         │       │   └── route.ts          ← GET /api/eye-metrics — proxy to Python :5001/metrics
         │       └── video-feed/
@@ -158,10 +161,13 @@ developer_cognitiv_load/                 ← workspace root
         │
         ├── hooks/
         │   ├── useSessionTimer.ts        ← 1s sim tick, 2s eye poll, 15s AI trigger
-        │   └── useKeyboardTracker.ts     ← Browser keydown WPM + tab-switch counting
+        │   ├── useKeyboardTracker.ts     ← Browser keydown WPM + tab-switch counting
+        │   └── useVoiceAlerts.ts         ← Real-metric voice alert queue and playback
         │
         ├── services/
-        │   └── ai.ts                     ← AI layer: Sarvam → Mistral → Ollama → rule-based
+        │   ├── ai.ts                     ← AI layer: Sarvam → Mistral → Ollama → rule-based
+        │   ├── voiceAgent.ts             ← Server-only Azure Foundry Voice Live adapter
+        │   └── voiceAlerts.ts            ← Threshold, hysteresis, and cooldown logic
         │
         ├── store/
         │   └── sessionStore.ts           ← Zustand store: session state + metric history buffers
@@ -859,10 +865,33 @@ These are read at module load time in `stream_server.py` using `os.environ.get()
 | `OLLAMA_MODEL` | No | Ollama model name (default `qwen2.5:3b`) |
 | `NEXT_PUBLIC_APP_NAME` | No | Display name (default `NeuroSync`) |
 | `NEXT_PUBLIC_APP_URL` | No | App base URL (default `http://localhost:3000`) |
+| `VOICE_ALERTS_ENABLED` | No | Set `true` to enable Azure Foundry spoken alerts |
+| `AZURE_VOICELIVE_ENDPOINT` | If voice alerts are enabled | Foundry Voice Live resource endpoint |
+| `AZURE_FOUNDRY_AGENT_NAME` | If voice alerts are enabled | Foundry agent name |
+| `AZURE_FOUNDRY_PROJECT_NAME` | If voice alerts are enabled | Foundry project name |
+| `AZURE_FOUNDRY_AGENT_VERSION` | No | Optional pinned agent version |
+| `AZURE_FOUNDRY_RESOURCE_OVERRIDE` | No | Optional cross-resource override |
+| `AZURE_FOUNDRY_AUTHENTICATION_IDENTITY_CLIENT_ID` | No | Optional managed identity client ID |
+| `NEXT_PUBLIC_VOICE_ALERT_COOLDOWN_SEC` | `600` | Browser-side alert cooldown in seconds |
 
 **Current `.env.local` state**: `USE_OLLAMA=true`, so the Sarvam and Mistral keys are present but bypassed. The app uses local Ollama with `qwen2.5:3b`.
 
 **Security note**: `.env.local` is gitignored in the Focus-plus directory. The `.env.local` file contains real API keys — these keys are at risk if the file is ever committed. The root `.gitignore` includes `.env` but not `.env.local` specifically; only the Focus-plus-level `.gitignore` excludes `.env.local`.
+
+### Voice alert behavior
+
+Voice Live Agent mode uses Microsoft Entra ID through `DefaultAzureCredential`.
+The tester can authenticate locally with `az login` or provide standard Azure
+identity environment variables. Credentials remain server-side in `.env.local`.
+
+The browser evaluates the smoothed real Python cognitive-load value; simulated
+or offline values never produce spoken alerts.
+
+- Crossing 50% speaks a calm reminder to finish up and take a break in the next 20 minutes.
+- Crossing 70% speaks the stronger reminder to finish up and take a break within the next 20 minutes.
+- Alerts use a 10-minute default cooldown and 5-point hysteresis: 45% resets the 50% alert and 65% resets the 70% alert.
+- A direct jump above 70% emits only the 70% alert.
+- The dashboard provides mute/status handling and continues monitoring if Azure is unavailable.
 
 ---
 
@@ -896,6 +925,8 @@ pandas>=2.2.0                # CSV loading in dashboard
 | `clsx` | ^2.1.1 | Conditional classes |
 | `class-variance-authority` | ^0.7.1 | Component variants |
 | `lucide-react` | ^1.16.0 | Icons |
+| `@azure/ai-voicelive` | 1.0.0-beta.3 | Server-side Foundry Voice Live sessions |
+| `@azure/identity` | ^4.6.0 | Microsoft Entra authentication via `DefaultAzureCredential` |
 
 **Dev dependencies:**
 
@@ -906,6 +937,7 @@ pandas>=2.2.0                # CSV loading in dashboard
 | `typescript` | ^5 | Type checking |
 | `eslint` | ^9 | Linting |
 | `eslint-config-next` | 16.2.6 | Next.js ESLint rules |
+| `vitest` | ^3.2.4 | Voice alert state-machine tests |
 
 ---
 
@@ -1069,7 +1101,28 @@ npm run dev
 # Opens http://localhost:3000
 ```
 
+For Azure Foundry voice alerts, copy `.env.example` to `.env.local`, set
+`VOICE_ALERTS_ENABLED=true`, provide the Foundry endpoint, agent name, and
+project name, then authenticate with Microsoft Entra ID (for example, `az login`).
+The voice alert integration does not require microphone access. It creates a
+short server-side Voice Live session for each queued reminder and returns the
+generated PCM audio as a browser-playable WAV response.
+
 Then open `http://localhost:3000` in a browser and click "Launch Dashboard →", then "Start Session".
+
+### Voice alert verification
+
+```bash
+cd keyboard_implementation/Focus-plus
+npm test
+npm run lint
+npm run build
+```
+
+With valid Foundry credentials, start a session and verify that real Python
+metrics crossing 50% and 70% produce the corresponding spoken reminders. If
+Azure is unavailable, the dashboard must remain usable and show the voice coach
+as unavailable rather than interrupting monitoring.
 
 ### Running: Option C — Streamlit post-session dashboard
 

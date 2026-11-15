@@ -21,6 +21,7 @@ import MetricCard from '@/components/ui/MetricCard';
 import AIInsightPanel from '@/components/ui/AIInsightPanel';
 import LiveChart from '@/components/ui/LiveChart';
 import WebcamFeed from '@/components/ui/WebcamFeed';
+import { useVoiceAlerts } from '@/hooks/useVoiceAlerts';
 import { motion } from 'framer-motion';
 
 function formatDuration(secs: number) {
@@ -50,6 +51,8 @@ export default function DashboardPage() {
 
   useSessionTimer();
   useKeyboardTracker();
+  const { voiceMuted, voiceStatus, lastVoiceAlert, armVoice, toggleVoiceMuted } =
+    useVoiceAlerts();
 
   const distractionColor =
     metrics.distractionLevel === 'High'
@@ -117,7 +120,7 @@ export default function DashboardPage() {
                   </button>
                 ) : (
                   <button
-                    onClick={startSession}
+                    onClick={() => { void armVoice(); startSession(); }}
                     className="flex items-center gap-2 px-4 py-1.5 rounded-xl bg-cyan-500/15 text-cyan-300 border border-cyan-500/25 hover:bg-cyan-500/25 transition-all text-sm font-medium"
                   >
                     <span className="w-2 h-2 rounded-full bg-cyan-400" />
@@ -206,6 +209,26 @@ export default function DashboardPage() {
                 </div>
               </div>
             </motion.div>
+
+            <div className="flex items-center justify-between rounded-xl border border-white/8 bg-white/3 px-4 py-2 text-xs shrink-0">
+              <div className="flex items-center gap-2 text-white/45">
+                <span className={`h-2 w-2 rounded-full ${
+                  voiceStatus === 'speaking' ? 'bg-cyan-400 animate-pulse' :
+                  voiceStatus === 'unavailable' || voiceStatus === 'error' ? 'bg-red-400' :
+                  voiceMuted ? 'bg-white/20' : 'bg-emerald-400'
+                }`} />
+                <span>
+                  Voice coach: {voiceMuted ? 'Muted' : voiceStatus === 'speaking' ? 'Speaking' : voiceStatus === 'unavailable' ? 'Unavailable' : 'Ready'}
+                  {lastVoiceAlert ? ` · last ${lastVoiceAlert.level}% alert` : ''}
+                </span>
+              </div>
+              <button
+                onClick={toggleVoiceMuted}
+                className="rounded-lg border border-white/10 px-2 py-1 text-white/50 hover:text-white/80 hover:bg-white/5"
+              >
+                {voiceMuted ? 'Unmute' : 'Mute'}
+              </button>
+            </div>
 
             {/* ── Primary metrics ────────────────────────────────────── */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">

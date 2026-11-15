@@ -4,6 +4,7 @@
 
 import { create } from 'zustand';
 import type { AIAnalysis } from '@/services/ai';
+import type { VoiceAlertLevel } from '@/services/voiceAlerts';
 
 export interface SessionMetrics {
   focusScore: number;
@@ -32,12 +33,18 @@ interface SessionState {
   lastAnalysisAt: number;
   /** Rolling buffer of raw cognitiveLoad readings for 10-sample averaging */
   _loadBuffer: number[];
+  voiceMuted: boolean;
+  voiceStatus: 'idle' | 'speaking' | 'muted' | 'unavailable' | 'error';
+  lastVoiceAlert: { level: VoiceAlertLevel; at: number } | null;
 
   startSession: () => void;
   stopSession: () => void;
   updateMetrics: (partial: Partial<SessionMetrics>) => void;
   setAnalysis: (analysis: AIAnalysis) => void;
   setAnalysisLoading: (loading: boolean) => void;
+  setVoiceMuted: (muted: boolean) => void;
+  setVoiceStatus: (status: SessionState['voiceStatus']) => void;
+  setLastVoiceAlert: (alert: { level: VoiceAlertLevel; at: number } | null) => void;
   resetSession: () => void;
 }
 
@@ -65,11 +72,20 @@ export const useSessionStore = create<SessionState>((set) => ({
   analysisLoading: false,
   lastAnalysisAt: 0,
   _loadBuffer: [],
+  voiceMuted: false,
+  voiceStatus: 'idle',
+  lastVoiceAlert: null,
 
   startSession: () =>
-    set({ isRunning: true, metrics: { ...defaultMetrics }, _loadBuffer: [] }),
+    set({
+      isRunning: true,
+      metrics: { ...defaultMetrics },
+      _loadBuffer: [],
+      voiceStatus: 'idle',
+      lastVoiceAlert: null,
+    }),
 
-  stopSession: () => set({ isRunning: false }),
+  stopSession: () => set({ isRunning: false, voiceStatus: 'idle' }),
 
   updateMetrics: (partial) =>
     set((state) => {
@@ -120,6 +136,19 @@ export const useSessionStore = create<SessionState>((set) => ({
 
   setAnalysisLoading: (loading) => set({ analysisLoading: loading }),
 
+  setVoiceMuted: (muted) => set({ voiceMuted: muted, voiceStatus: muted ? 'muted' : 'idle' }),
+
+  setVoiceStatus: (status) => set({ voiceStatus: status }),
+
+  setLastVoiceAlert: (alert) => set({ lastVoiceAlert: alert }),
+
   resetSession: () =>
-    set({ isRunning: false, metrics: { ...defaultMetrics }, analysis: null, _loadBuffer: [] }),
+    set({
+      isRunning: false,
+      metrics: { ...defaultMetrics },
+      analysis: null,
+      _loadBuffer: [],
+      voiceStatus: 'idle',
+      lastVoiceAlert: null,
+    }),
 }));
