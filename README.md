@@ -1,4 +1,4 @@
-# NeuroSync
+# MindOps
 
 AI-powered real-time cognitive-load monitoring for developers.
 
