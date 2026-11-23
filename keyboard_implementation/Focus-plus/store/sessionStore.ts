@@ -66,10 +66,25 @@ export const useSessionStore = create<SessionState>((set) => ({
   lastAnalysisAt: 0,
   _loadBuffer: [],
 
-  startSession: () =>
-    set({ isRunning: true, metrics: { ...defaultMetrics }, _loadBuffer: [] }),
+  startSession: () => {
+    set({ isRunning: true, metrics: { ...defaultMetrics }, _loadBuffer: [] });
+    void fetch('/api/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'start' }),
+    }).catch(() => {
+      // The dashboard remains usable if the Python backend is offline.
+    });
+  },
 
-  stopSession: () => set({ isRunning: false }),
+  stopSession: () => {
+    set({ isRunning: false });
+    void fetch('/api/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'stop' }),
+    }).catch(() => undefined);
+  },
 
   updateMetrics: (partial) =>
     set((state) => {
@@ -120,6 +135,12 @@ export const useSessionStore = create<SessionState>((set) => ({
 
   setAnalysisLoading: (loading) => set({ analysisLoading: loading }),
 
-  resetSession: () =>
-    set({ isRunning: false, metrics: { ...defaultMetrics }, analysis: null, _loadBuffer: [] }),
+  resetSession: () => {
+    set({ isRunning: false, metrics: { ...defaultMetrics }, analysis: null, _loadBuffer: [] });
+    void fetch('/api/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'stop' }),
+    }).catch(() => undefined);
+  },
 }));
