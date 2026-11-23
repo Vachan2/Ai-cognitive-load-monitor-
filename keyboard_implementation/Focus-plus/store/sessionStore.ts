@@ -4,6 +4,7 @@
 
 import { create } from 'zustand';
 import type { AIAnalysis } from '@/services/ai';
+import type { VoiceAlertLevel } from '@/services/voiceAlerts';
 
 export interface SessionMetrics {
   focusScore: number;
@@ -32,13 +33,28 @@ interface SessionState {
   lastAnalysisAt: number;
   /** Rolling buffer of raw cognitiveLoad readings for 10-sample averaging */
   _loadBuffer: number[];
+  voiceMuted: boolean;
+  voiceStatus: 'idle' | 'speaking' | 'muted' | 'unavailable' | 'error';
+  lastVoiceAlert: { level: VoiceAlertLevel; at: number } | null;
+
+  // Voice state
+  voiceAlertLevel: VoiceAlertLevel | null;
+  voiceAnalysisLoading: boolean;
+  lastVoiceAnalysisAt: number;
 
   startSession: () => void;
   stopSession: () => void;
   updateMetrics: (partial: Partial<SessionMetrics>) => void;
   setAnalysis: (analysis: AIAnalysis) => void;
   setAnalysisLoading: (loading: boolean) => void;
+  setVoiceMuted: (muted: boolean) => void;
+  setVoiceStatus: (status: SessionState['voiceStatus']) => void;
+  setLastVoiceAlert: (alert: { level: VoiceAlertLevel; at: number } | null) => void;
   resetSession: () => void;
+
+  // Voice actions
+  setVoiceAlertLevel: (level: VoiceAlertLevel) => void;
+  setVoiceAnalysisLoading: (loading: boolean) => void;
 }
 
 const defaultMetrics: SessionMetrics = {
@@ -65,6 +81,14 @@ export const useSessionStore = create<SessionState>((set) => ({
   analysisLoading: false,
   lastAnalysisAt: 0,
   _loadBuffer: [],
+  voiceMuted: false,
+  voiceStatus: 'idle',
+  lastVoiceAlert: null,
+
+  // Voice state
+  voiceAlertLevel: null,
+  voiceAnalysisLoading: false,
+  lastVoiceAnalysisAt: 0,
 
   startSession: () => {
     set({ isRunning: true, metrics: { ...defaultMetrics }, _loadBuffer: [] });
@@ -143,4 +167,11 @@ export const useSessionStore = create<SessionState>((set) => ({
       body: JSON.stringify({ action: 'stop' }),
     }).catch(() => undefined);
   },
+
+  // Voice actions
+  setVoiceAlertLevel: (level) => set({ voiceAlertLevel: level, voiceAnalysisLoading: false, lastVoiceAnalysisAt: Date.now() }),
+  setVoiceAnalysisLoading: (loading) => set({ voiceAnalysisLoading: loading }),
+  setVoiceMuted: (muted) => set({ voiceMuted: muted }),
+  setVoiceStatus: (status) => set({ voiceStatus: status }),
+  setLastVoiceAlert: (alert) => set({ lastVoiceAlert: alert }),
 }));

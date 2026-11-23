@@ -42,12 +42,12 @@ export default function WebcamFeed({
   // Only attempt to connect when the session is running
   useEffect(() => {
     if (!isRunning) {
-      setConn('offline');
+      queueMicrotask(() => setConn('offline'));
       if (imgRef.current) imgRef.current.src = '';
       return;
     }
 
-    setConn('connecting');
+    queueMicrotask(() => setConn('connecting'));
     if (imgRef.current) {
       // Append a cache-bust so the browser re-requests on reconnect
       imgRef.current.src = `${streamUrl}?t=${Date.now()}`;
